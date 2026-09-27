@@ -1,0 +1,95 @@
+name: Update Website Data
+
+on:
+  schedule:
+    # Run every 6 hours at :30 past the hour
+    - cron: '30 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force update even if no changes'
+        required: false
+        default: 'false'
+
+jobs:
+  update-site:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find website-data.json in Google Drive
+        id: find-file
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          DRIVE_FOLDER_ID: '1qOw2ykpmWGlLDEkxV5yOlJE4WC-dpX60'
+        run: |
+          echo "Searching for website-data.json in Drive folder..."
+          RESPONSE=$(curl -s "https://www.googleapis.com/drive/v3/files?q='${DRIVE_FOLDER_ID}'+in+parents+and+name='website-data.json'+and+trashed=false&key=${GOOGLE_API_KEY}&fields=files(id,modifiedTime)")
+
+          FILE_ID=$(echo "$RESPONSE" | jq -r '.files[0].id // empty')
+          MODIFIED=$(echo "$RESPONSE" | jq -r '.files[0].modifiedTime // empty')
+
+          if [ -z "$FILE_ID" ]; then
+            echo "::error::No website-data.json found in Drive folder"
+            echo "$RESPONSE"
+            exit 1
+          fi
+
+          echo "file_id=$FILE_ID" >> "$GITHUB_OUTPUT"
+          echo "Found file ID: $FILE_ID (modified: $MODIFIED)"
+
+      - name: Download data file from Google Drive
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          curl -s "https://www.googleapis.com/drive/v3/files/${{ steps.find-file.outputs.file_id }}?alt=media&key=${GOOGLE_API_KEY}" -o website-data.json
+
+          # Validate JSON
+          if ! jq empty website-data.json 2>/dev/null; then
+            echo "::error::Downloaded file is not valid JSON"
+            cat website-data.json
+            exit 1
+          fi
+
+          VERSION=$(jq -r .version website-data.json)
+          ARTICLES=$(jq '.news | length' website-data.json)
+          LISTINGS=$(jq '.listings | length' website-data.json)
+          echo "Downloaded version $VERSION ($ARTICLES articles, $LISTINGS listings)"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run build script
+        run: |
+          python update-site.py index.html website-data.json
+
+      - name: Check for changes
+        id: check
+        run: |
+          if git diff --quiet index.html; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes detected in index.html"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            DIFF_STATS=$(git diff --stat index.html)
+            echo "Changes detected:"
+            echo "$DIFF_STATS"
+          fi
+
+      - name: Commit and push
+        if: steps.check.outputs.changed == 'true' || github.event.inputs.force == 'true'
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          git config user.name "DaveNg Property Bot"
+          git config user.email "daveng0707@gmail.com"
+
+          VERSION=$(jq -r .version website-data.json)
+          git add index.html
+          git commit -m "Update website content (v${VERSION})"
+
+          git push "https://${GH_PAT}@github.com/daveng92/davengproperty.com.git" HEAD:main
+          echo "Pushed update v${VERSION} to GitHub"
