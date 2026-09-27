@@ -91,5 +91,5 @@ jobs:
           git add index.html
           git commit -m "Update website content (v${VERSION})"
 
-          git push "https://${GH_PAT}@github.com/daveng92/davengproperty.com.git" HEAD:main
+          git push origin HEAD:main
           echo "Pushed update v${VERSION} to GitHub"
