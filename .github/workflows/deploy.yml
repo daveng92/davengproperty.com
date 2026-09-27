@@ -78,7 +78,6 @@ jobs:
             echo "Changes detected:"
             echo "$DIFF_STATS"
           fi
-
       - name: Commit and push
         if: steps.check.outputs.changed == 'true' || github.event.inputs.force == 'true'
         env:
@@ -86,14 +85,13 @@ jobs:
         run: |
           git config user.name "DaveNg Property Bot"
           git config user.email "daveng0707@gmail.com"
-          git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
           
-          # Verify the remote URL is correctly rewritten
-          git remote set-url origin "https://${GH_PAT}@github.com/daveng92/davengproperty.com.git"
-
+          # Set remote URL with authentication
+          git remote set-url origin "https://x-access-token:${GH_PAT}@github.com/daveng92/davengproperty.com.git"
+          
           VERSION=$(jq -r .version website-data.json)
           git add index.html
           git commit -m "Update website content (v${VERSION})"
-
+          
           git push origin HEAD:main
           echo "Pushed update v${VERSION} to GitHub"
