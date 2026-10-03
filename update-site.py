@@ -91,15 +91,26 @@ def extract_existing_images(html_content, container_id):
     return images
 
 
-def build_news_card(article, existing_image=None):
+def build_news_card(article, existing_image=None, news_source_images=None):
     icon_key = article.get("icon", "house")
     icon_path = ICONS.get(icon_key, ICONS["house"])
-    title_escaped = html.escape(article["title"]).replace("’", "&rsquo;").replace("'", "&rsquo;")
-    summary_escaped = html.escape(article["summary"]).replace("’", "&rsquo;").replace("—", "&mdash;")
+    title_escaped = html.escape(article["title"]).replace("'", "&rsquo;").replace("'", "&rsquo;")
+    summary_escaped = html.escape(article["summary"]).replace("'", "&rsquo;").replace("—", "&mdash;")
 
-    # Use existing base64 image if available and JSON doesn't provide one
+    # Image priority: image_file from article or news_source_images > existing image > gradient
+    image_file = article.get("image_file", "")
+
+    # If article doesn't have its own image_file, look up source logo
+    if not image_file and news_source_images:
+        source = article.get("source", "")
+        source_entry = news_source_images.get(source, {})
+        image_file = source_entry.get("image_file", "")
+
     bg_style = article['gradient']
-    if existing_image:
+    if image_file:
+        # Use downloaded image file from images/ directory
+        bg_style = f"url('images/{image_file}') center/cover no-repeat"
+    elif existing_image:
         # Existing Pillow-generated thumbnail — use it as background
         bg_style = f"url('{existing_image}') center/cover no-repeat"
 
@@ -116,11 +127,13 @@ def build_news_card(article, existing_image=None):
             </div>
           </a>'''
 
-def build_news_section(articles, existing_images=None):
+def build_news_section(articles, existing_images=None, news_source_images=None):
     if existing_images is None:
         existing_images = {}
+    if news_source_images is None:
+        news_source_images = {}
     cards = "".join(
-        build_news_card(a, existing_images.get(a.get('url', '')))
+        build_news_card(a, existing_images.get(a.get('url', '')), news_source_images)
         for a in articles
     )
     return f'''<div class="news-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:24px;margin:32px 0">
@@ -132,9 +145,13 @@ def build_news_section(articles, existing_images=None):
 
 def build_listing_card(listing, existing_image=None):
     """Build a single listing card HTML."""
-    # Priority: JSON image > existing image from HTML > gradient fallback
+    # Priority: image_file > JSON base64 image > existing image from HTML > gradient fallback
+    image_file = listing.get("image_file", "")
     image = listing.get("image", "")
-    if image and image.startswith("data:image"):
+    if image_file:
+        # Use downloaded image file from images/ directory
+        img_style = f"background:url('images/{image_file}') center/cover no-repeat"
+    elif image and image.startswith("data:image"):
         img_style = f"background:url('{image}') center/cover no-repeat"
     elif existing_image:
         # Preserve existing AIcutPro image from the HTML
@@ -236,9 +253,14 @@ def update_html(html_content, data):
     if existing_listing_images:
         print(f"  Preserved {len(existing_listing_images)} existing listing image(s)")
 
+    # Extract news source images mapping (source name → image_file)
+    news_source_images = data.get("news_source_images", {})
+    if news_source_images:
+        print(f"  News source images: {len(news_source_images)} sources")
+
     # Update news section
     if "news" in data and data["news"]:
-        news_html = build_news_section(data["news"], existing_news_images)
+        news_html = build_news_section(data["news"], existing_news_images, news_source_images)
         html_content = replace_container(html_content, "news-container", news_html)
         print(f"  News: {len(data['news'])} articles")
 
@@ -246,9 +268,10 @@ def update_html(html_content, data):
     if "listings" in data and data["listings"]:
         listings_html = build_listings_section(data["listings"], existing_listing_images)
         html_content = replace_container(html_content, "listings-container", listings_html)
+        has_file_images = sum(1 for l in data["listings"] if l.get("image_file", ""))
         has_json_images = sum(1 for l in data["listings"] if l.get("image", "").startswith("data:image"))
         has_preserved = sum(1 for l in data["listings"] if l.get("url", "") in existing_listing_images)
-        print(f"  Listings: {len(data['listings'])} properties ({has_json_images} JSON images, {has_preserved} preserved)")
+        print(f"  Listings: {len(data['listings'])} properties ({has_file_images} file images, {has_json_images} base64 images, {has_preserved} preserved)")
 
     return html_content
 
