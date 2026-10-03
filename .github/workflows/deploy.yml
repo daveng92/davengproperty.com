@@ -59,6 +59,66 @@ jobs:
           LISTINGS=$(jq '.listings | length' website-data.json)
           echo "Downloaded version $VERSION ($ARTICLES articles, $LISTINGS listings)"
 
+      - name: Download image files from Google Drive
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          DRIVE_FOLDER_ID: '1qOw2ykpmWGlLDEkxV5yOlJE4WC-dpX60'
+        run: |
+          mkdir -p images
+
+          # Find all image files in the Drive folder (jpg/png)
+          echo "Searching for image files in Drive folder..."
+          RESPONSE=$(curl -s "https://www.googleapis.com/drive/v3/files?q='${DRIVE_FOLDER_ID}'+in+parents+and+(mimeType='image/jpeg'+or+mimeType='image/png')+and+trashed=false&key=${GOOGLE_API_KEY}&fields=files(id,name,size)&pageSize=50")
+
+          FILE_COUNT=$(echo "$RESPONSE" | jq '.files | length')
+          echo "Found $FILE_COUNT image files in Drive"
+
+          # Download each image from Drive
+          echo "$RESPONSE" | jq -r '.files[] | "\(.id) \(.name)"' | while read -r FILE_ID FNAME; do
+            echo "Downloading $FNAME from Drive..."
+            curl -s "https://www.googleapis.com/drive/v3/files/${FILE_ID}?alt=media&key=${GOOGLE_API_KEY}" -o "images/${FNAME}"
+            SIZE=$(stat -c%s "images/${FNAME}" 2>/dev/null || echo "?")
+            echo "  Saved images/${FNAME} (${SIZE} bytes)"
+          done
+
+      - name: Download images from URLs in JSON
+        run: |
+          mkdir -p images
+
+          echo "=== Downloading listing images from image_url fields ==="
+          # Download listing images from image_url (only if file doesn't already exist from Drive)
+          jq -r '.listings[] | select(.image_url != null and .image_url != "") | "\(.image_file) \(.image_url)"' website-data.json | while read -r FNAME URL; do
+            if [ -n "$FNAME" ] && [ -n "$URL" ]; then
+              if [ -f "images/${FNAME}" ] && [ "$(stat -c%s "images/${FNAME}" 2>/dev/null)" -gt 1000 ]; then
+                echo "  SKIP images/${FNAME} (already exists from Drive, $(stat -c%s "images/${FNAME}") bytes)"
+              else
+                echo "  Downloading ${FNAME} from ${URL}..."
+                curl -sL -o "images/${FNAME}" "$URL"
+                SIZE=$(stat -c%s "images/${FNAME}" 2>/dev/null || echo "?")
+                echo "  Saved images/${FNAME} (${SIZE} bytes)"
+              fi
+            fi
+          done
+
+          echo "=== Downloading news source logo images ==="
+          # Download news source logos from news_source_images (reusable per source)
+          jq -r '.news_source_images // {} | to_entries[] | "\(.value.image_file) \(.value.image_url)"' website-data.json | while read -r FNAME URL; do
+            if [ -n "$FNAME" ] && [ -n "$URL" ]; then
+              if [ -f "images/${FNAME}" ] && [ "$(stat -c%s "images/${FNAME}" 2>/dev/null)" -gt 1000 ]; then
+                echo "  SKIP images/${FNAME} (already exists, $(stat -c%s "images/${FNAME}") bytes)"
+              else
+                echo "  Downloading ${FNAME} from ${URL}..."
+                curl -sL -o "images/${FNAME}" "$URL"
+                SIZE=$(stat -c%s "images/${FNAME}" 2>/dev/null || echo "?")
+                echo "  Saved images/${FNAME} (${SIZE} bytes)"
+              fi
+            fi
+          done
+
+          echo ""
+          echo "=== Images directory ==="
+          ls -la images/ || echo "No images downloaded"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -71,14 +131,14 @@ jobs:
       - name: Check for changes
         id: check
         run: |
-          if git diff --quiet index.html; then
+          if git diff --quiet index.html && [ -z "$(git ls-files --others --exclude-standard images/)" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No changes detected in index.html"
+            echo "No changes detected"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            DIFF_STATS=$(git diff --stat index.html)
             echo "Changes detected:"
-            echo "$DIFF_STATS"
+            git diff --stat index.html
+            git ls-files --others --exclude-standard images/
           fi
       - name: Commit and push
         if: steps.check.outputs.changed == 'true' || github.event.inputs.force == 'true'
@@ -87,13 +147,13 @@ jobs:
         run: |
           git config user.name "DaveNg Property Bot"
           git config user.email "daveng0707@gmail.com"
-          
+
           # Set remote URL with authentication
           git remote set-url origin "https://x-access-token:${GH_PAT}@github.com/daveng92/davengproperty.com.git"
-          
+
           VERSION=$(jq -r .version website-data.json)
-          git add index.html
+          git add index.html images/
           git commit -m "Update website content (v${VERSION})"
-          
+
           git push origin HEAD:main
           echo "Pushed update v${VERSION} to GitHub"
