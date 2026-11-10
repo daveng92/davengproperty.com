@@ -170,7 +170,7 @@ def build_listing_card(listing, existing_image=None):
     <h4 style="font-family:'Playfair Display',serif;font-size:17px;margin:0 0 6px">{html.escape(listing['title'])}</h4>
     <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">{html.escape(listing['address'])}</div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--text-muted)">
-      <span>{html.escape(listing['type'])}</span><span>{html.escape(listing['sqft'])} sqft</span><span>{html.escape(listing['bedrooms'])} Bed &middot; {html.escape(listing['bathrooms'])} Bath</span>
+      <span>{html.escape(str(listing['type']))}</span><span>{html.escape(str(listing['sqft']))} sqft</span><span>{html.escape(str(listing['bedrooms']))} Bed &middot; {html.escape(str(listing['bathrooms']))} Bath</span>
     </div>
   </div>
 </a>'''
