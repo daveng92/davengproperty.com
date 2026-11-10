@@ -143,7 +143,7 @@ jobs:
       - name: Commit and push
         if: steps.check.outputs.changed == 'true' || github.event.inputs.force == 'true'
         env:
-          GH_PAT: ${{ secrets.GITHUB_TOKEN }}
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           git config user.name "DaveNg Property Bot"
           git config user.email "daveng0707@gmail.com"
